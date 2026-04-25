@@ -5,21 +5,29 @@ import matplotlib.pyplot as plt
 from pybaseball import playerid_lookup, statcast_batter
 from datetime import datetime, timedelta
 
-# --- 介面設定 ---
+# --- 介面樣式設定 ---
 st.set_page_config(page_title="MLB Hitting Chart", layout="wide")
 
 st.markdown("""
     <style>
-    .main { background-color: #FFFFFF !important; }
-    h1 { color: #1F2937 !important; font-family: 'Segoe UI', sans-serif; font-weight: 800; border-bottom: 3px solid #3498DB; }
+    /* 強制整體背景與標題顏色 */
+    .main { background-color: #0E1117 !important; }
+    /* 【修正1】將標題調成白色，並加強視覺重量 */
+    h1 { 
+        color: #FFFFFF !important; 
+        font-family: 'Segoe UI', sans-serif; 
+        font-weight: 800; 
+        border-bottom: 2px solid #3498DB; 
+        padding-bottom: 10px;
+    }
     .stMarkdown h1 a, .stMarkdown h1 span { display: none !important; }
-    div[data-testid="stDataFrame"] td { font-size: 16px !important; color: #333333 !important; }
+    div[data-testid="stDataFrame"] td { font-size: 16px !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("MLB 打者擊球落點圖")
 
-# --- 顏色定義 (確保包含 Intentional Walk) ---
+# --- 顏色定義 ---
 color_palette = {
     'Single': '#FF4B4B', 'Double': '#FFAA00', 'Triple': '#FFAA00', 
     'Home Run': '#00C9A7', 'Field Out': '#3498DB', 
@@ -29,7 +37,7 @@ color_palette = {
 def style_number_col(row):
     color = color_palette.get(row['結果'], 'white')
     return [f'background-color: {color}; color: black; font-weight: bold; text-align: center;' 
-            if name == '打席' else 'background-color: white; color: black;' for name in row.index]
+            if name == '打席' else 'background-color: #1A1C24; color: white;' for name in row.index]
 
 with st.sidebar:
     st.header("選手查詢")
@@ -38,7 +46,7 @@ with st.sidebar:
     submit = st.button("更新數據")
 
 if submit:
-    with st.spinner('正在進行最後的視覺調教...'):
+    with st.spinner('正在校準壘包位置與標題顏色...'):
         player_info = playerid_lookup(last_name, first_name)
         if not player_info.empty:
             mlbam_id = player_info.key_mlbam.values[0]
@@ -53,33 +61,33 @@ if submit:
                 col1, col2 = st.columns([1.6, 1])
 
                 with col1:
-                    fig, ax = plt.subplots(figsize=(10, 10), facecolor='white')
+                    # 為了讓標題白色好看，圖表背景也設為透明以適應網頁
+                    fig, ax = plt.subplots(figsize=(10, 10), facecolor='none')
                     
                     def tx(x): return (x - 125.5) * 3.5
                     def ty(y): return (205 - y) * 2.6 
 
-                    # 【修正 1】：大幅提高球場線的 zorder (設定為 10)，確保線條永遠在標籤上方
+                    # 球場線條 (zorder=10 確保置頂)
                     # 內野實線
-                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#2C3E50', lw=2.5, zorder=10)
+                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#FFFFFF', lw=2.5, zorder=10)
                     # 外野實線
                     ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#7F8C8D', lw=2.5, ls='-', zorder=10)
 
-                    # 壘包方塊 (zorder 也提高)
-                    base_size = 12
-                    ax.plot(125, 125, marker='s', color='#2C3E50', markersize=base_size, zorder=11)
-                    ax.plot(0, 250, marker='s', color='#2C3E50', markersize=base_size, zorder=11)
-                    ax.plot(-125, 125, marker='s', color='#2C3E50', markersize=base_size, zorder=11)
+                    # 【修正2】壘包直接放置在菱形的頂點角度上
+                    base_size = 10
+                    # 一壘、二壘、三壘 (精確對齊線條交點)
+                    ax.plot(125, 125, marker='s', color='#FFFFFF', markersize=base_size, zorder=11)
+                    ax.plot(0, 250, marker='s', color='#FFFFFF', markersize=base_size, zorder=11)
+                    ax.plot(-125, 125, marker='s', color='#FFFFFF', markersize=base_size, zorder=11)
 
                     for i, row in game_data.iterrows():
                         event_raw = str(row['events']).lower()
-                        # 關鍵判斷：排除不需要畫在圖上的事件
                         if any(x in event_raw for x in ['strikeout', 'walk', 'hit_by_pitch']): continue
                             
                         if pd.notna(row['hc_x']):
                             x, y = tx(row['hc_x']), ty(row['hc_y'])
                             if 'home_run' not in event_raw: y = min(y, 450)
                             
-                            # 顏色匹配
                             event_key = "Home Run" if 'home_run' in event_raw else "Field Out"
                             if 'single' in event_raw: event_key = "Single"
                             elif 'double' in event_raw: event_key = "Double"
@@ -88,16 +96,14 @@ if submit:
                             color = color_palette.get(event_key, '#95A5A6')
                             marker = '*' if 'home_run' in event_raw else 'o'
                             
-                            # 點位 zorder 設為 5 (在線條之下)
                             ax.scatter(x, y, c=color, s=450, marker=marker, edgecolors='black', linewidths=1.2, zorder=5)
-                            
-                            # 數字標籤 zorder 設為 6 (在線條之下，點位之上)
-                            ax.text(x+15, y+15, str(i+1), color='#1F2937', ha='left', va='bottom', 
+                            ax.text(x+15, y+15, str(i+1), color='#FFFFFF', ha='left', va='bottom', 
                                     fontweight='bold', fontsize=12, zorder=6,
-                                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', boxstyle='round,pad=0.2'))
+                                    bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2'))
 
                     ax.set_xlim([-480, 480]); ax.set_ylim([-50, 680]); ax.set_aspect('equal'); ax.axis('off')
-                    ax.set_title(f"{first_name} {last_name} | {latest_date}", fontsize=24, fontweight='bold', color='#1F2937', pad=50)
+                    # 圖表內部的文字標題也設為白色
+                    ax.set_title(f"{first_name} {last_name} | {latest_date}", fontsize=24, fontweight='bold', color='#FFFFFF', pad=50)
                     st.pyplot(fig)
 
                 with col2:
@@ -105,7 +111,6 @@ if submit:
                     records = []
                     for i, row in game_data.iterrows():
                         e = str(row['events']).lower()
-                        # 【修正 2】：最強力拼寫修正判斷
                         if 'intent' in e:
                             event_display = "Intentional Walk"
                         elif 'hit_by_pitch' in e:
@@ -120,7 +125,7 @@ if submit:
                     st.dataframe(df_display.style.apply(style_number_col, axis=1), use_container_width=True, hide_index=True)
                     
                     st.markdown("---")
-                    st.info("💡 **終極修正**：強制將球場線圖層置頂防止遮擋，並全面校正 Intentional Walk 顯示邏輯。")
+                    st.info("💡 **修正紀錄**：標題顏色已轉為白色，壘包精確對齊內野菱形頂點。")
 
                 st.success(f"更新完畢")
             else: st.warning("無數據。")
