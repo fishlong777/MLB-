@@ -38,7 +38,7 @@ with st.sidebar:
     submit = st.button("更新數據")
 
 if submit:
-    with st.spinner('正在優化視覺細節...'):
+    with st.spinner('正在校準壘位與標籤...'):
         player_info = playerid_lookup(last_name, first_name)
         if not player_info.empty:
             mlbam_id = player_info.key_mlbam.values[0]
@@ -58,9 +58,15 @@ if submit:
                     def tx(x): return (x - 125.5) * 3.5
                     def ty(y): return (205 - y) * 3.5
 
-                    # 【修正1】：線條粗細一致化 (lw=2.5)
-                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#2C3E50', lw=2.5, zorder=3) # 內野
-                    ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#7F8C8D', lw=2.5, ls='-', zorder=1) # 外野
+                    # 球場線條 (lw=2.5 一致)
+                    # 內野實線
+                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#2C3E50', lw=2.5, zorder=3)
+                    # 外野實線
+                    ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#7F8C8D', lw=2.5, ls='-', zorder=1)
+
+                    # 【新增】標記 1, 2, 3 壘位置
+                    for label, lx, ly in [("1ST", 135, 125), ("2ND", 0, 265), ("3RD", -135, 125)]:
+                        ax.text(lx, ly, label, color='#7F8C8D', fontsize=10, fontweight='bold', ha='center')
 
                     for i, row in game_data.iterrows():
                         event_raw = str(row['events'])
@@ -72,13 +78,12 @@ if submit:
                             color = color_palette.get(event_raw.replace('_', ' ').title(), '#95A5A6')
                             marker = '*' if event_raw == 'home_run' else 'o'
                             
-                            # 繪製點
-                            ax.scatter(x, y, c=color, s=400, marker=marker, edgecolors='black', linewidths=1.2, zorder=5)
+                            ax.scatter(x, y, c=color, s=450, marker=marker, edgecolors='black', linewidths=1.2, zorder=5)
                             
-                            # 【修正2】：數字標籤外移至點的右上角，確保可辨識性
-                            ax.text(x+10, y+10, str(i+1), color='#1F2937', ha='left', va='bottom', 
+                            # 【修正】優化數字標籤位置，避免吃圖
+                            ax.text(x+15, y+15, str(i+1), color='#1F2937', ha='left', va='bottom', 
                                     fontweight='bold', fontsize=12, zorder=6,
-                                    bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', pad=1))
+                                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', boxstyle='round,pad=0.2'))
 
                     ax.set_xlim([-480, 480]); ax.set_ylim([-50, 680]); ax.set_aspect('equal'); ax.axis('off')
                     ax.set_title(f"{first_name} {last_name} | {latest_date}", fontsize=24, fontweight='bold', color='#1F2937', pad=50)
@@ -89,7 +94,7 @@ if submit:
                     records = []
                     for i, row in game_data.iterrows():
                         e = str(row['events'])
-                        # 【修正3】：確保 Intentional Walk 拼寫
+                        # 確保 Intentional Walk 顯示正確
                         event_display = "Intentional Walk" if e == "intentional_walk" else e.replace('_', ' ').title()
                         speed = f"{row['launch_speed']:.0f} mph" if pd.notna(row['launch_speed']) else "--"
                         records.append({"打席": i+1, "結果": event_display, "初速": speed})
@@ -98,7 +103,7 @@ if submit:
                     st.dataframe(df_display.style.apply(style_number_col, axis=1), use_container_width=True, hide_index=True)
                     
                     st.markdown("---")
-                    st.info("💡 **視覺微調**：線條粗細已統一，打席編號已從圓心移至旁側以利辨識。")
+                    st.info("💡 **修正清單**：新增壘位標註 (1ST/2ND/3RD)，優化打席編號間距避免遮擋，修正 Intentional Walk 拼寫。")
 
                 st.success(f"更新完畢")
             else: st.warning("無數據。")
