@@ -143,7 +143,7 @@ if st.session_state.data_cache is not None:
              '#D62728']
     curr['color'] = [clist[i % len(clist)] for i in range(len(curr))]
 
-    st.title(f"{st.session_state.p_name} - {sel_date}")
+    st.title(f"{st.session_state.p_name.title()} - {sel_date}")
     c1, c2 = st.columns([1.2, 1])
     with c1:
         st.plotly_chart(plot_spray_chart(curr), use_container_width=True)
