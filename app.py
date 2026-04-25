@@ -138,4 +138,14 @@ if st.session_state.data_cache is not None:
         st.table(t_df.style.apply(
             lambda r: [f'background-color: {curr.loc[r.name, "color"]}; color: black; font-weight: bold'] * len(r),
             axis=1))
-st.write(f"目前的變數內容：{display_name}")
+# --- 終極暴力：使用 Markdown 並強迫 CSS 關閉小寫轉換 ---
+    raw_name = str(st.session_state.p_name)
+    display_name = " ".join([word.capitalize() for word in raw_name.split()])
+    
+    # 用 Markdown 取代 st.title，並加上 style 屬性
+    st.markdown(f"""
+        <h1 style='text-transform: none !important;'>
+            {display_name} - {sel_date}
+        </h1>
+    """, unsafe_allow_html=True)
+    # -----------------------------------------------------
