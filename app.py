@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from pybaseball import playerid_lookup, statcast_batter
 from datetime import datetime, timedelta
 
-# --- 介面設定 ---
+# --- 介面樣式設定 ---
 st.set_page_config(page_title="MLB Hitting Chart", layout="wide")
 
 st.markdown("""
@@ -38,7 +38,7 @@ with st.sidebar:
     submit = st.button("更新數據")
 
 if submit:
-    with st.spinner('正在精確繪製落點...'):
+    with st.spinner('正在優化視覺細節...'):
         player_info = playerid_lookup(last_name, first_name)
         if not player_info.empty:
             mlbam_id = player_info.key_mlbam.values[0]
@@ -58,11 +58,9 @@ if submit:
                     def tx(x): return (x - 125.5) * 3.5
                     def ty(y): return (205 - y) * 3.5
 
-                    # 【修正1】：全部改為實線
-                    # 內野實線
-                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#2C3E50', lw=4, zorder=3)
-                    # 外野全壘打牆改為實線
-                    ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#7F8C8D', lw=2.5, ls='-', zorder=1)
+                    # 【修正1】：線條粗細一致化 (lw=2.5)
+                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#2C3E50', lw=2.5, zorder=3) # 內野
+                    ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#7F8C8D', lw=2.5, ls='-', zorder=1) # 外野
 
                     for i, row in game_data.iterrows():
                         event_raw = str(row['events'])
@@ -70,31 +68,28 @@ if submit:
                             
                         if pd.notna(row['hc_x']):
                             x, y = tx(row['hc_x']), ty(row['hc_y'])
-                            if event_raw == 'single': y = min(y, 230)
                             
-                            # 格式化顯示名稱
-                            event_name = event_raw.replace('_', ' ').title()
-                            color = color_palette.get(event_name, '#95A5A6')
+                            color = color_palette.get(event_raw.replace('_', ' ').title(), '#95A5A6')
                             marker = '*' if event_raw == 'home_run' else 'o'
                             
-                            ax.scatter(x, y, c=color, s=750 if marker == '*' else 450, 
-                                       marker=marker, edgecolors='black', linewidths=1.2, zorder=5)
-                            ax.text(x, y, str(i+1), color='black' if marker == '*' else 'white', 
-                                    ha='center', va='center', fontweight='bold', fontsize=11)
+                            # 繪製點
+                            ax.scatter(x, y, c=color, s=400, marker=marker, edgecolors='black', linewidths=1.2, zorder=5)
+                            
+                            # 【修正2】：數字標籤外移至點的右上角，確保可辨識性
+                            ax.text(x+10, y+10, str(i+1), color='#1F2937', ha='left', va='bottom', 
+                                    fontweight='bold', fontsize=12, zorder=6,
+                                    bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', pad=1))
 
-                    # 【修正2】：放寬 Y 軸上限至 650，解決點位撞標題問題
-                    ax.set_xlim([-480, 480]); ax.set_ylim([-50, 650]); ax.set_aspect('equal'); ax.axis('off')
-                    
-                    # 標題增加 pad，徹底分離標題與繪圖區
-                    ax.set_title(f"{first_name} {last_name} | {latest_date}", fontsize=24, fontweight='bold', color='#1F2937', pad=40)
+                    ax.set_xlim([-480, 480]); ax.set_ylim([-50, 680]); ax.set_aspect('equal'); ax.axis('off')
+                    ax.set_title(f"{first_name} {last_name} | {latest_date}", fontsize=24, fontweight='bold', color='#1F2937', pad=50)
                     st.pyplot(fig)
 
                 with col2:
                     st.subheader("📋 打席結果明細")
                     records = []
                     for i, row in game_data.iterrows():
-                        # 【修正3】：修正故意保送拼寫
                         e = str(row['events'])
+                        # 【修正3】：確保 Intentional Walk 拼寫
                         event_display = "Intentional Walk" if e == "intentional_walk" else e.replace('_', ' ').title()
                         speed = f"{row['launch_speed']:.0f} mph" if pd.notna(row['launch_speed']) else "--"
                         records.append({"打席": i+1, "結果": event_display, "初速": speed})
@@ -103,8 +98,8 @@ if submit:
                     st.dataframe(df_display.style.apply(style_number_col, axis=1), use_container_width=True, hide_index=True)
                     
                     st.markdown("---")
-                    st.info("💡 **更新公告**：全線條改為實線，修正 Intentional Walk 拼寫，並優化標題間距。")
+                    st.info("💡 **視覺微調**：線條粗細已統一，打席編號已從圓心移至旁側以利辨識。")
 
-                st.success(f"落點圖已更新")
+                st.success(f"更新完畢")
             else: st.warning("無數據。")
         else: st.error("找不到球員。")
