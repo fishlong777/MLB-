@@ -1,151 +1,157 @@
 import streamlit as st
+from pybaseball import statcast_batter, playerid_lookup
 import pandas as pd
+import plotly.graph_objects as go
 import numpy as np
-import matplotlib.pyplot as plt
-from pybaseball import playerid_lookup, statcast_batter
-from datetime import datetime, timedelta
+from datetime import datetime
+import unicodedata
 
-# --- 1. 介面樣式徹底鎖定：徹底解決「變黑」與「看不到」的問題 ---
-st.set_page_config(page_title="MLB Hitting Chart", layout="wide")
+# 設定頁面配置
+st.set_page_config(layout="wide", page_title="MLB 球員分析系統")
 
-st.markdown("""
-    <style>
-    /* 全域背景強制白色 */
-    .stApp { background-color: #FFFFFF !important; }
 
-    /* 【區域 1】側邊欄整體背景：淺灰色 */
-    [data-testid="stSidebar"] {
-        background-color: #F1F5F9 !important;
-        border-right: 1px solid #E2E8F0;
-    }
+# --- 1. 核心函數：處理特殊字元 ---
+def normalize_text(text):
+    if not isinstance(text, str): return ""
+    return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn').lower()
 
-    /* 【區域 2】徹底解決輸入框變黑問題：強制白底黑字 */
-    div[data-baseweb="input"], div[data-baseweb="input"] input {
-        background-color: #FFFFFF !important;
-        color: #000000 !important;
-        -webkit-text-fill-color: #000000 !important;
-    }
-    label[data-testid="stWidgetLabel"] p {
-        color: #1E293B !important;
-        font-weight: bold !important;
-    }
 
-    /* 【區域 3】表格標頭：深色商務灰底白字 */
-    [data-testid="stDataFrame"] thead tr th {
-        background-color: #334155 !important;
-        color: #FFFFFF !important;
-        font-weight: bold !important;
-    }
+# --- 2. 核心函數：動態球場牆界計算 ---
+def get_wall_radius(theta):
+    """
+    根據角度計算球場全壘打牆的物理距離 (簡化版球場模型)
+    中外野 (pi/2) 約 400ft, 左右邊線 (pi/4, 3pi/4) 約 325ft
+    """
+    # 使用餘弦函數模擬中外野突出的形狀
+    # 當 theta = pi/2 (90度), cos(2*(theta-pi/2)) = 1 -> 半徑最大
+    # 當 theta = pi/4 或 3pi/4, cos 為負 -> 半徑最小
+    base_wall = 355  # 平均半徑
+    depth_variation = 45  # 深度變化量
+    return base_wall + depth_variation * np.cos(2 * (theta - np.pi / 2))
 
-    /* 文字全黑化 */
-    h1, h2, h3, h4, p, span {
-        color: #0F172A !important;
-        font-family: 'Inter', -apple-system, sans-serif !important;
-    }
 
-    /* 移除標題雜質 */
-    .stMarkdown h1 a { display: none !important; }
-    h1 { border-bottom: 2px solid #0F172A; padding-bottom: 12px; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- 3. 核心函數：座標轉換 (包含牆界限制) ---
+def transform_coords_refined(hc_x, hc_y, distance, events):
+    if pd.isna(hc_x) or pd.isna(hc_y) or (hc_x == 0 and hc_y == 0):
+        return None, None
 
-st.title("MLB 打者擊球落點圖")
+    # 1. 計算角度 theta
+    theta_offset = (hc_x - 125.42) * 0.0085
+    theta = np.pi / 2 - theta_offset
+    theta = np.clip(theta, np.pi / 4 + 0.01, 3 * np.pi / 4 - 0.01)
 
-# --- 2. 顏色方案：嚴格同步表格與點位 (莫蘭迪高對比) ---
-color_palette = {
-    'Single': '#E27367',      # 珊瑚紅
-    'Double': '#E9C46A',      # 芥末金
-    'Triple': '#F4A261',      # 琥珀橘
-    'Home Run': '#2A9D8F',    # 翡翠綠
-    'Field Out': '#3B82F6',   # 亮藍 (與截圖 4 號圓圈同步)
-    'Strikeout': '#94A3B8',   # 鋼鐵灰
-    'Walk': '#A78BFA',        # 薰衣草紫
-    'Intentional Walk': '#A78BFA', 
-    'Hit By Pitch': '#A78BFA'
-}
+    # 2. 取得該方向的牆界半徑
+    wall_at_angle = get_wall_radius(theta)
 
-def style_df(df):
-    """【區域 4】表格標色：確保與圖表點位顏色完全 100% 同步"""
-    return df.style.apply(lambda r: [
-        f'background-color: {color_palette.get(r["結果"], "#FFFFFF")}; color: #FFFFFF; font-weight: bold; text-align: center;' 
-        if n == '打席' else 'background-color: #FFFFFF; color: #0F172A;' for n in r.index
-    ], axis=1)
+    # 3. 決定視覺半徑 r
+    r = float(distance) if not pd.isna(distance) else 15.0
+    r = max(r, 18.0)
 
-with st.sidebar:
-    st.header("🔍 選手查詢")
-    first_name = st.text_input("First Name", "AARON").strip().upper()
-    last_name = st.text_input("Last Name", "JUDGE").strip().upper()
-    submit = st.button("更新落點數據")
+    # 邏輯核心：如果是出局球 (Sac Fly/Field Out)，距離絕對不能超過該處的牆界
+    is_hr = 'home run' in str(events).lower()
+    if not is_hr and r >= (wall_at_angle - 5):
+        r = wall_at_angle - 8  # 強制縮回到牆內 8 英尺處，模擬牆前接殺
 
-if submit:
-    with st.spinner('正在精確校正物理座標...'):
-        player_info = playerid_lookup(last_name.capitalize(), first_name.capitalize())
-        if not player_info.empty:
-            mlbam_id = player_info.key_mlbam.values[0]
-            data = statcast_batter((datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'), 
-                                  datetime.now().strftime('%Y-%m-%d'), mlbam_id)
-            
-            if not data.empty:
-                latest_date = data['game_date'].max()
-                game_data = data[data['game_date'] == latest_date].copy()
-                game_data = game_data[game_data['events'].notna()].sort_index(ascending=True).reset_index(drop=True)
+    tx = r * np.cos(theta)
+    ty = r * np.sin(theta)
+    return tx, ty
 
-                col1, col2 = st.columns([1.6, 1])
 
-                with col1:
-                    # 球場繪製：鎖定座標比例
-                    fig, ax = plt.subplots(figsize=(10, 10), facecolor='white')
-                    
-                    def tx(x): return (x - 125.5) * 3.8
-                    def ty(y): return (205 - y) * 2.8 
+# --- 4. 繪圖函數 ---
+def plot_spray_chart(df):
+    fig = go.Figure()
+    t_range = np.linspace(np.pi / 4, 3 * np.pi / 4, 100)
 
-                    # 內野菱形與球場線
-                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#1E293B', lw=2.5, zorder=10)
-                    ax.plot([0, 280, 0, -280, 0], [0, 280, 480, 280, 0], color='#CBD5E1', lw=2.5, ls='-', zorder=1)
+    # 繪製動態全壘打牆 (符合現實: 中外野深、邊線淺)
+    wall_radii = [get_wall_radius(t) for t in t_range]
+    wall_x = [r * np.cos(t) for r, t in zip(wall_radii, t_range)]
+    wall_y = [r * np.sin(t) for r, t in zip(wall_radii, t_range)]
 
-                    # 壘包位置 (入角)
-                    ax.plot(113, 125, marker='s', color='#1E293B', markersize=9, zorder=11)
-                    ax.plot(0, 238, marker='s', color='#1E293B', markersize=9, zorder=11)
-                    ax.plot(-113, 125, marker='s', color='#1E293B', markersize=9, zorder=11)
+    # 草皮與紅土
+    fig.add_trace(
+        go.Scatter(x=[0] + wall_x + [0], y=[0] + wall_y + [0], fill='toself', fillcolor='rgba(34, 139, 34, 0.2)',
+                   line_width=0, showlegend=False))
+    fig.add_trace(
+        go.Scatter(x=[0] + (145 * np.cos(t_range)).tolist() + [0], y=[0] + (145 * np.sin(t_range)).tolist() + [0],
+                   fill='toself', fillcolor='rgba(255, 165, 0, 0.3)', line_width=0, showlegend=False))
 
-                    for i, row in game_data.iterrows():
-                        event_raw = str(row['events']).lower()
-                        if any(x in event_raw for x in ['strikeout', 'walk', 'hit_by_pitch']): continue
-                            
-                        if pd.notna(row['hc_x']):
-                            x, y = tx(row['hc_x']), ty(row['hc_y'])
-                            if 'home_run' not in event_raw: y = min(y, 450)
-                            
-                            # 判定事件類別
-                            if 'home_run' in event_raw: k = 'Home Run'
-                            elif 'single' in event_raw: k = 'Single'
-                            elif 'double' in event_raw: k = 'Double'
-                            elif 'triple' in event_raw: k = 'Triple'
-                            else: k = 'Field Out'
-                            
-                            color = color_palette.get(k, '#94A3B8')
-                            ax.scatter(x, y, c=color, s=550, marker='*' if k == 'Home Run' else 'o', 
-                                       edgecolors='black', linewidths=1.5, zorder=5)
-                            
-                            # 數字標籤 (白底黑字)
-                            ax.text(x+16, y+16, str(i+1), color='#0F172A', fontweight='bold', fontsize=12,
-                                    bbox=dict(facecolor='white', alpha=0.9, edgecolor='#1E293B', boxstyle='round,pad=0.2'))
+    # 紅色動態牆線
+    fig.add_trace(
+        go.Scatter(x=wall_x, y=wall_y, mode='lines', line=dict(color='red', dash='dash', width=3), name='全壘打牆'))
 
-                    ax.set_xlim([-500, 500]); ax.set_ylim([-50, 700]); ax.set_aspect('equal'); ax.axis('off')
-                    ax.set_title(f"{first_name} {last_name} | {latest_date}", fontsize=24, fontweight='bold', color='#0F172A', pad=50)
-                    st.pyplot(fig)
+    # 壘包
+    s = 90 / np.sqrt(2)
+    fig.add_trace(
+        go.Scatter(x=[0, s, 0, -s, 0], y=[0, s, s * 2, s, 0], mode='lines+markers', line=dict(color='black', width=3),
+                   marker=dict(symbol='square', size=13, color='white', line=dict(width=1.5, color='black')),
+                   showlegend=False))
 
-                with col2:
-                    st.subheader("📋 打席結果明細")
-                    records = []
-                    for i, row in game_data.iterrows():
-                        e = str(row['events']).lower()
-                        event_display = "Intentional Walk" if 'intent' in e else e.replace('_', ' ').title()
-                        speed = f"{row['launch_speed']:.0f} mph" if pd.notna(row['launch_speed']) else "--"
-                        records.append({"打席": i+1, "結果": event_display, "初速": speed})
-                    
-                    df_display = pd.DataFrame(records)
-                    # 套用表格樣式：打席顏色連動
-                    st.dataframe(style_df(df_display), use_container_width=True, hide_index=True)
+    for i, row in df.iterrows():
+        tx, ty = transform_coords_refined(row['hc_x'], row['hc_y'], row['hit_distance_sc'], row['events'])
+        if tx is not None:
+            fig.add_trace(go.Scatter(x=[tx], y=[ty], mode='markers',
+                                     marker=dict(size=18, color=row['color'], line=dict(width=1.5, color='black')),
+                                     hovertemplate=f"打席: {i + 1}<br>結果: {row['events']}<br>距離: {row['hit_distance_sc']} ft",
+                                     showlegend=False))
 
-                st.success("✅ 視覺渲染與色彩同步校正完畢")
+    fig.update_layout(xaxis=dict(visible=False, range=[-400, 400], scaleanchor="y", scaleratio=1),
+                      yaxis=dict(visible=False, range=[-30, 500]), width=700, height=700, plot_bgcolor='rgba(0,0,0,0)',
+                      margin=dict(l=0, r=0, t=30, b=0))
+    return fig
+
+
+# --- 5. 數據邏輯 (與先前一致) ---
+if 'data_cache' not in st.session_state: st.session_state.data_cache = None
+if 'p_name' not in st.session_state: st.session_state.p_name = ""
+
+st.sidebar.header("球員查詢")
+p_query = st.sidebar.text_input("輸入球員姓名", placeholder="例如：Ronald Acuna").strip()
+
+if st.sidebar.button("查詢資料"):
+    try:
+        names = p_query.split()
+        if len(names) >= 2:
+            f_in, l_in = names[0], names[-1]
+            with st.spinner('讀取數據中...'):
+                common_map = {"acuna": "Acuña", "alvarez": "Álvarez"}
+                s_last = common_map.get(l_in.lower(), l_in)
+                l = playerid_lookup(s_last, f_in)
+                if l.empty:
+                    all_l = playerid_lookup(l_in)
+                    if not all_l.empty:
+                        all_l['f_norm'] = all_l['name_first'].apply(normalize_text)
+                        l = all_l[all_l['f_norm'] == normalize_text(f_in)].head(1)
+                if not l.empty:
+                    res = l.iloc[0]
+                    st.session_state.p_name = f"{res['name_first']} {res['name_last']}".title()
+                    pid = res['key_mlbam']
+                    raw = statcast_batter('2024-03-01', '2026-12-31', pid)
+                    st.session_state.data_cache = raw[raw['events'].notna()].copy()
+                else:
+                    st.error("找不到球員")
+    except Exception as e:
+        st.error(f"錯誤: {e}")
+
+if st.session_state.data_cache is not None:
+    df = st.session_state.data_cache
+    df['game_date'] = pd.to_datetime(df['game_date']).dt.date
+    sel_date = st.sidebar.selectbox("選擇日期", sorted(df['game_date'].unique(), reverse=True)[:10])
+    curr = df[df['game_date'] == sel_date].copy().sort_values('at_bat_number').reset_index(drop=True)
+    curr['events'] = curr['events'].str.replace('_', ' ').str.replace('intent walk', 'intentional walk', case=False)
+
+    clist = ['#AEC7E8', '#FFBB78', '#98DF8A', '#FF9896', '#C5B0D5', '#C49C94', '#F7B6D2', '#DBDB8D', '#9EDAE5',
+             '#D62728']
+    curr['color'] = [clist[i % len(clist)] for i in range(len(curr))]
+
+    st.title(f"{st.session_state.p_name} - {sel_date}")
+    c1, c2 = st.columns([1.2, 1])
+    with c1:
+        st.plotly_chart(plot_spray_chart(curr), use_container_width=True)
+    with c2:
+        t_df = curr[['events', 'launch_speed', 'launch_angle', 'hit_distance_sc']].copy()
+        t_df.columns = ['結果', '初速(mph)', '仰角(°)', '距離(ft)']
+        for col in t_df.columns[1:]: t_df[col] = pd.to_numeric(t_df[col]).fillna(0.0).map('{:.1f}'.format)
+        t_df.insert(0, '打席', range(1, len(t_df) + 1))
+        st.table(t_df.style.apply(
+            lambda r: [f'background-color: {curr.loc[r.name, "color"]}; color: black; font-weight: bold'] * len(r),
+            axis=1))
