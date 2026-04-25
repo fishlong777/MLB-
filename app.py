@@ -5,53 +5,63 @@ import matplotlib.pyplot as plt
 from pybaseball import playerid_lookup, statcast_batter
 from datetime import datetime, timedelta
 
-# --- 徹底鎖定視覺樣式 ---
+# --- 介面質感與層次設定 ---
 st.set_page_config(page_title="MLB Hitting Chart", layout="wide")
 
 st.markdown("""
     <style>
-    /* 1. 背景改為舒服的深藍灰色，絕非全黑 */
+    /* 背景改為更深邃的午夜藍黑，增加層次感 */
     .stApp {
-        background-color: #1E293B !important;
+        background-color: #0F172A !important; 
     }
     
-    /* 2. 標題文字強制白色，並移除所有連結符號 */
+    /* 標題與分界線：使用亮藍色強調 */
     h1 { 
-        color: #FFFFFF !important; 
+        color: #F8FAFC !important; 
         font-family: 'Segoe UI', sans-serif; 
         font-weight: 800; 
-        border-bottom: 2px solid #3B82F6;
+        border-bottom: 3px solid #3B82F6;
+        padding-bottom: 12px;
+        letter-spacing: 1px;
     }
+    
+    /* 移除自動生成的連結符號 */
     .stMarkdown h1 a, .stMarkdown h1 span { display: none !important; }
     
-    /* 3. 側邊欄配色統一 */
+    /* 側邊欄配色 */
     section[data-testid="stSidebar"] {
-        background-color: #0F172A !important;
-    }
-    section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] p {
-        color: #F8FAFC !important;
+        background-color: #020617 !important;
+        border-right: 1px solid #1E293B;
     }
     
-    /* 4. 表格深色化優化 */
+    /* 表格容器區塊：讓它稍微浮現出來 */
     div[data-testid="stDataFrame"] {
-        background-color: #334155 !important;
+        background-color: #1E293B !important;
+        border-radius: 8px;
+        padding: 5px;
     }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("MLB 打者擊球落點圖")
 
-# --- 顏色定義 (鮮豔高對比) ---
+# --- 顏色定義 (高飽和度，確保在深色底清晰) ---
 color_palette = {
-    'Single': '#F87171', 'Double': '#FB923C', 'Triple': '#FBBF24', 
-    'Home Run': '#34D399', 'Field Out': '#60A5FA', 
-    'Strikeout': '#94A3B8', 'Walk': '#A78BFA', 'Intentional Walk': '#A78BFA', 'Hit By Pitch': '#A78BFA'
+    'Single': '#EF4444',      # 鮮紅
+    'Double': '#F59E0B',      # 亮橘
+    'Triple': '#FCD34D',      # 銘黃
+    'Home Run': '#10B981',    # 寶石綠
+    'Field Out': '#3B82F6',   # 亮藍
+    'Strikeout': '#64748B',   # 藍灰
+    'Walk': '#8B5CF6',        # 靛紫
+    'Intentional Walk': '#8B5CF6', 
+    'Hit By Pitch': '#8B5CF6'
 }
 
 def style_number_col(row):
     color = color_palette.get(row['結果'], '#FFFFFF')
-    return [f'background-color: {color}; color: black; font-weight: bold; text-align: center;' 
-            if name == '打席' else 'background-color: #1E293B; color: white;' for name in row.index]
+    return [f'background-color: {color}; color: #0F172A; font-weight: bold; text-align: center;' 
+            if name == '打席' else 'background-color: #1E293B; color: #F8FAFC;' for name in row.index]
 
 with st.sidebar:
     st.header("🔍 選手查詢")
@@ -60,7 +70,7 @@ with st.sidebar:
     submit = st.button("更新數據")
 
 if submit:
-    with st.spinner('正在精確校準座標與配色...'):
+    with st.spinner('正在優化數據視覺渲染...'):
         player_info = playerid_lookup(last_name, first_name)
         if not player_info.empty:
             mlbam_id = player_info.key_mlbam.values[0]
@@ -75,21 +85,23 @@ if submit:
                 col1, col2 = st.columns([1.6, 1])
 
                 with col1:
+                    # 使用透明背景
                     fig, ax = plt.subplots(figsize=(10, 10), facecolor='none')
                     
-                    # 重新計算倍率，讓內野菱形與點位在畫面中更和諧
+                    # 座標倍率
                     def tx(x): return (x - 125.5) * 3.2
                     def ty(y): return (205 - y) * 2.2 
 
-                    # 球場實線 (淡藍灰色)
-                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#94A3B8', lw=2.5, zorder=3)
-                    ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#475569', lw=2.5, ls='-', zorder=1)
+                    # 球場實線：調亮線條顏色 (#CBD5E1) 增加對比
+                    line_color = '#94A3B8'
+                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color=line_color, lw=2.5, zorder=3)
+                    ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#334155', lw=2.5, ls='-', zorder=1)
 
-                    # 【關鍵修正】：壘包方塊縮進 90 度「角裡面」 (偏移 12 單位)
+                    # 壘包方塊入角
                     off = 12
-                    ax.plot(125-off, 125, marker='s', color='#F8FAFC', markersize=9, zorder=11) # 一壘往內
-                    ax.plot(0, 250-off, marker='s', color='#F8FAFC', markersize=9, zorder=11)   # 二壘往下
-                    ax.plot(-125+off, 125, marker='s', color='#F8FAFC', markersize=9, zorder=11) # 三壘往內
+                    ax.plot(125-off, 125, marker='s', color='#F8FAFC', markersize=9, zorder=11)
+                    ax.plot(0, 250-off, marker='s', color='#F8FAFC', markersize=9, zorder=11)
+                    ax.plot(-125+off, 125, marker='s', color='#F8FAFC', markersize=9, zorder=11)
 
                     for i, row in game_data.iterrows():
                         event_raw = str(row['events']).lower()
@@ -107,14 +119,16 @@ if submit:
                             color = color_palette.get(event_key, '#94A3B8')
                             marker = '*' if 'home_run' in event_raw else 'o'
                             
-                            ax.scatter(x, y, c=color, s=450, marker=marker, edgecolors='black', linewidths=1.2, zorder=5)
-                            # 數字標籤標註在旁，避免遮擋
+                            # 點位增加白色邊緣，確保在深色底跳出來
+                            ax.scatter(x, y, c=color, s=480, marker=marker, edgecolors='#F8FAFC', linewidths=1.5, zorder=5)
+                            
+                            # 數字標籤改用亮色系背景
                             ax.text(x+15, y+15, str(i+1), color='#F8FAFC', ha='left', va='bottom', 
                                     fontweight='bold', fontsize=12, zorder=6,
-                                    bbox=dict(facecolor='#0F172A', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.2'))
+                                    bbox=dict(facecolor='#0F172A', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.2'))
 
                     ax.set_xlim([-450, 450]); ax.set_ylim([-50, 600]); ax.set_aspect('equal'); ax.axis('off')
-                    ax.set_title(f"{first_name} {last_name} | {latest_date}", fontsize=24, fontweight='bold', color='#FFFFFF', pad=40)
+                    ax.set_title(f"{first_name} {last_name} | {latest_date}", fontsize=24, fontweight='bold', color='#F8FAFC', pad=40)
                     st.pyplot(fig)
 
                 with col2:
@@ -130,6 +144,6 @@ if submit:
                     st.dataframe(df_display.style.apply(style_number_col, axis=1), use_container_width=True, hide_index=True)
                     
                     st.markdown("---")
-                    st.info("💡 **視覺修正**：背景調整為深藍灰，壘包已強制縮進內野角內。")
+                    st.info("💡 **視覺修正**：強化背景深度與線條對比，增加點位白色邊緣以利辨識。")
 
-                st.success(f"數據渲染完成")
+                st.success(f"視覺效果已優化")
