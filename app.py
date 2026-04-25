@@ -16,12 +16,8 @@ def normalize_text(text):
 
 # --- 2. 核心函數：動態球場牆界計算 ---
 def get_wall_radius(theta):
-    """
-    根據角度計算球場全壘打牆的物理距離
-    中外野 (pi/2) 約 400ft, 左右邊線 (pi/4, 3pi/4) 約 325ft
-    """
-    base_wall = 355  # 平均半徑
-    depth_variation = 45  # 深度變化量
+    base_wall = 355  
+    depth_variation = 45  
     return base_wall + depth_variation * np.cos(2 * (theta - np.pi / 2))
 
 # --- 3. 核心函數：座標轉換 (包含牆界限制) ---
@@ -40,7 +36,7 @@ def transform_coords_refined(hc_x, hc_y, distance, events):
 
     is_hr = 'home run' in str(events).lower()
     if not is_hr and r >= (wall_at_angle - 5):
-        r = wall_at_angle - 8  # 強制縮回到牆內
+        r = wall_at_angle - 8  
 
     tx = r * np.cos(theta)
     ty = r * np.sin(theta)
@@ -93,7 +89,7 @@ if st.sidebar.button("查詢資料"):
                         l = all_l[all_l['f_norm'] == normalize_text(f_in)].head(1)
                 if not l.empty:
                     res = l.iloc[0]
-                    # 儲存原始名字
+                    # 儲存原始資料的名字
                     st.session_state.p_name = f"{res['name_first']} {res['name_last']}"
                     pid = res['key_mlbam']
                     raw = statcast_batter('2024-03-01', '2026-12-31', pid)
@@ -108,7 +104,6 @@ if st.session_state.data_cache is not None:
     df = st.session_state.data_cache
     df['game_date'] = pd.to_datetime(df['game_date']).dt.date
     
-    # 側邊欄日期選單
     dates = sorted(df['game_date'].unique(), reverse=True)[:10]
     sel_date = st.sidebar.selectbox("選擇日期", dates)
     
@@ -118,11 +113,23 @@ if st.session_state.data_cache is not None:
     clist = ['#AEC7E8', '#FFBB78', '#98DF8A', '#FF9896', '#C5B0D5', '#C49C94', '#F7B6D2', '#DBDB8D', '#9EDAE5', '#D62728']
     curr['color'] = [clist[i % len(clist)] for i in range(len(curr))]
 
-    # --- 暴力大寫邏輯 ---
-    # 分割字串，將每個單字首字母大寫，再組合成字串
-    display_name = " ".join([word.capitalize() for word in str(st.session_state.p_name).split()])
-    st.title(f"{display_name} - {sel_date}")
-    # ------------------
+    # --- 終極修正：使用強制 CSS 渲染標題 ---
+    # 先做 Python 層級的大小寫轉換
+    raw_name = str(st.session_state.p_name)
+    display_name = " ".join([word.capitalize() for word in raw_name.split()])
+    
+    # 這裡直接用 HTML 寫死，加上 !important 標籤，徹底解決系統強制小寫的問題
+    st.markdown(f"""
+        <style>
+            .custom-title {{
+                text-transform: none !important;
+                font-size: 3rem;
+                font-weight: 700;
+                margin-bottom: 1rem;
+            }}
+        </style>
+        <h1 class="custom-title">{display_name} - {sel_date}</h1>
+    """, unsafe_allow_html=True)
 
     c1, c2 = st.columns([1.2, 1])
     with c1:
@@ -138,14 +145,3 @@ if st.session_state.data_cache is not None:
         st.table(t_df.style.apply(
             lambda r: [f'background-color: {curr.loc[r.name, "color"]}; color: black; font-weight: bold'] * len(r),
             axis=1))
-# --- 終極暴力：使用 Markdown 並強迫 CSS 關閉小寫轉換 ---
-    raw_name = str(st.session_state.p_name)
-    display_name = " ".join([word.capitalize() for word in raw_name.split()])
-    
-    # 用 Markdown 取代 st.title，並加上 style 屬性
-    st.markdown(f"""
-        <h1 style='text-transform: none !important;'>
-            {display_name} - {sel_date}
-        </h1>
-    """, unsafe_allow_html=True)
-    # -----------------------------------------------------
