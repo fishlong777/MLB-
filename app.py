@@ -138,3 +138,4 @@ if st.session_state.data_cache is not None:
         st.table(t_df.style.apply(
             lambda r: [f'background-color: {curr.loc[r.name, "color"]}; color: black; font-weight: bold'] * len(r),
             axis=1))
+st.write(f"目前的變數內容：{display_name}")
