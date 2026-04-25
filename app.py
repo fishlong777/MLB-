@@ -123,7 +123,7 @@ if st.sidebar.button("查詢資料"):
                         l = all_l[all_l['f_norm'] == normalize_text(f_in)].head(1)
                 if not l.empty:
                     res = l.iloc[0]
-                    st.session_state.p_name = f"{res['name_first']} {res['name_last']}".title()
+                    st.session_state.p_name = str(f"{res['name_first']} {res['name_last']}").title()
                     pid = res['key_mlbam']
                     raw = statcast_batter('2024-03-01', '2026-12-31', pid)
                     st.session_state.data_cache = raw[raw['events'].notna()].copy()
