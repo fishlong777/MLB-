@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from pybaseball import playerid_lookup, statcast_batter
 from datetime import datetime, timedelta
 
-# --- 介面樣式 ---
+# --- 介面設定 ---
 st.set_page_config(page_title="MLB Hitting Chart", layout="wide")
 
 st.markdown("""
@@ -19,7 +19,7 @@ st.markdown("""
 
 st.title("MLB 打者擊球落點圖")
 
-# --- 顏色定義 ---
+# --- 顏色定義 (確保包含 Intentional Walk) ---
 color_palette = {
     'Single': '#FF4B4B', 'Double': '#FFAA00', 'Triple': '#FFAA00', 
     'Home Run': '#00C9A7', 'Field Out': '#3498DB', 
@@ -38,7 +38,7 @@ with st.sidebar:
     submit = st.button("更新數據")
 
 if submit:
-    with st.spinner('正在校準物理座標與壘包視覺...'):
+    with st.spinner('正在進行最後的視覺調教...'):
         player_info = playerid_lookup(last_name, first_name)
         if not player_info.empty:
             mlbam_id = player_info.key_mlbam.values[0]
@@ -55,36 +55,43 @@ if submit:
                 with col1:
                     fig, ax = plt.subplots(figsize=(10, 10), facecolor='white')
                     
-                    # 【關鍵修正】：縮小 ty 比例 (3.5 -> 2.6)，防止球飛過頭
                     def tx(x): return (x - 125.5) * 3.5
                     def ty(y): return (205 - y) * 2.6 
 
-                    # 球場實線
-                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#2C3E50', lw=2.5, zorder=3)
-                    ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#7F8C8D', lw=2.5, ls='-', zorder=1)
+                    # 【修正 1】：大幅提高球場線的 zorder (設定為 10)，確保線條永遠在標籤上方
+                    # 內野實線
+                    ax.plot([0, 125, 0, -125, 0], [0, 125, 250, 125, 0], color='#2C3E50', lw=2.5, zorder=10)
+                    # 外野實線
+                    ax.plot([0, 270, 0, -270, 0], [0, 270, 460, 270, 0], color='#7F8C8D', lw=2.5, ls='-', zorder=10)
 
-                    # 【修正】：移除文字，改用小方塊作為壘包
+                    # 壘包方塊 (zorder 也提高)
                     base_size = 12
-                    # 一、二、三壘壘包
-                    ax.plot(125, 125, marker='s', color='#2C3E50', markersize=base_size, zorder=4)
-                    ax.plot(0, 250, marker='s', color='#2C3E50', markersize=base_size, zorder=4)
-                    ax.plot(-125, 125, marker='s', color='#2C3E50', markersize=base_size, zorder=4)
+                    ax.plot(125, 125, marker='s', color='#2C3E50', markersize=base_size, zorder=11)
+                    ax.plot(0, 250, marker='s', color='#2C3E50', markersize=base_size, zorder=11)
+                    ax.plot(-125, 125, marker='s', color='#2C3E50', markersize=base_size, zorder=11)
 
                     for i, row in game_data.iterrows():
-                        event_raw = str(row['events'])
-                        if event_raw in ['strikeout', 'walk', 'intentional_walk', 'hit_by_pitch']: continue
+                        event_raw = str(row['events']).lower()
+                        # 關鍵判斷：排除不需要畫在圖上的事件
+                        if any(x in event_raw for x in ['strikeout', 'walk', 'hit_by_pitch']): continue
                             
                         if pd.notna(row['hc_x']):
                             x, y = tx(row['hc_x']), ty(row['hc_y'])
+                            if 'home_run' not in event_raw: y = min(y, 450)
                             
-                            # 邏輯保護：若非全壘打，強制不飛出全壘打牆 (高度 440 附近)
-                            if event_raw != 'home_run': y = min(y, 430)
+                            # 顏色匹配
+                            event_key = "Home Run" if 'home_run' in event_raw else "Field Out"
+                            if 'single' in event_raw: event_key = "Single"
+                            elif 'double' in event_raw: event_key = "Double"
+                            elif 'triple' in event_raw: event_key = "Triple"
                             
-                            event_name = "Intentional Walk" if event_raw == "intentional_walk" else event_raw.replace('_', ' ').title()
-                            color = color_palette.get(event_name, '#95A5A6')
-                            marker = '*' if event_raw == 'home_run' else 'o'
+                            color = color_palette.get(event_key, '#95A5A6')
+                            marker = '*' if 'home_run' in event_raw else 'o'
                             
+                            # 點位 zorder 設為 5 (在線條之下)
                             ax.scatter(x, y, c=color, s=450, marker=marker, edgecolors='black', linewidths=1.2, zorder=5)
+                            
+                            # 數字標籤 zorder 設為 6 (在線條之下，點位之上)
                             ax.text(x+15, y+15, str(i+1), color='#1F2937', ha='left', va='bottom', 
                                     fontweight='bold', fontsize=12, zorder=6,
                                     bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', boxstyle='round,pad=0.2'))
@@ -97,9 +104,15 @@ if submit:
                     st.subheader("📋 打席結果明細")
                     records = []
                     for i, row in game_data.iterrows():
-                        e = str(row['events'])
-                        # 【修正】：表格內拼寫強制更換
-                        event_display = "Intentional Walk" if e == "intentional_walk" else e.replace('_', ' ').title()
+                        e = str(row['events']).lower()
+                        # 【修正 2】：最強力拼寫修正判斷
+                        if 'intent' in e:
+                            event_display = "Intentional Walk"
+                        elif 'hit_by_pitch' in e:
+                            event_display = "Hit By Pitch"
+                        else:
+                            event_display = e.replace('_', ' ').title()
+                            
                         speed = f"{row['launch_speed']:.0f} mph" if pd.notna(row['launch_speed']) else "--"
                         records.append({"打席": i+1, "結果": event_display, "初速": speed})
                     
@@ -107,7 +120,7 @@ if submit:
                     st.dataframe(df_display.style.apply(style_number_col, axis=1), use_container_width=True, hide_index=True)
                     
                     st.markdown("---")
-                    st.info("💡 **修正紀錄**：修正 Intentional Walk 拼寫，將 Y 軸壓縮至合理外野範圍，並將壘包標籤更換為實體方塊。")
+                    st.info("💡 **終極修正**：強制將球場線圖層置頂防止遮擋，並全面校正 Intentional Walk 顯示邏輯。")
 
                 st.success(f"更新完畢")
             else: st.warning("無數據。")
